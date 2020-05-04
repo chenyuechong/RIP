@@ -12,11 +12,14 @@ my_router_id = None
 input_ports =[]
 output_ports = []
 neighbours = []
+configure_table = []
+
+# listen socket list
 listen_sockets = []
 
 #routing table
 routing_table = []
-configure_table = []
+
 
 #routing table config data
 MAX_METRIC = 16
@@ -26,10 +29,11 @@ MUST_BE_ZERO = 0
 ADDRESS_FAMILY_IDENTIFIER = 2
 
 #default timer setting
-TIME_OUT = 50 #default 180
-GARBAGE_COLLECT_TIME = 30 #default 120
+TIME_OUT = 20 #default 180
+GARBAGE_COLLECT_TIME = 20 #default 120
 PERIODIC_TIME = 10 #default 30
- #CHECK_TIME = 5using to check timeout and garbage collection for routing table
+CHECK_TIME = 4 # after a triggered update is sent, a timer should be set 
+#for a random interval between 1 and 5, so we choose 4
 
 #timers
 periodic_timer = None
@@ -133,19 +137,22 @@ def initPeriodicTimer():
     
 def initTimeoutTimer():
     global timeout_timer
-    timeout_timer = threading.Timer(TIME_OUT, processRouteTimeout, [])
+    #as we metioned before, after send triggered update is sent, time will be set for 4.
+    timeout_timer = threading.Timer(CHECK_TIME, processRouteTimeout, [])
     timeout_timer.start()
     
 def initGarbageCollectionTimer():
     global garbage_collection_timer
-    garbage_collection_timer = threading.Timer(GARBAGE_COLLECT_TIME, processGarbageCollection, [])
+    #as we metioned before, after send triggered update is sent, time will be set for 4.    
+    garbage_collection_timer = threading.Timer(CHECK_TIME, processGarbageCollection, [])
     garbage_collection_timer.start()
 
 
 def sendUnsoclicitedResponse():
     """send unsoclicited response"""
     global is_periodic_send, periodic_timer
-    is_periodic_send = True  #start periodic sending
+    #when start periodic sending set the flag to true,after that set it back
+    is_periodic_send = True  
     sendPacket(False)  #send out the whole routing table
     is_periodic_send = False # end periodic sending
     random_offset = random.randint(-5,5)
@@ -160,11 +167,13 @@ def processRouteTimeout():
     for item in routing_table:
         destination = item['destination']
         if destination != my_router_id:
-            # time out then sign the destination matric 16
+            # if the destination information is not been updated or the time is unexpired
+            #pass and wait next started time to process
             if item['last_update_time'] is None or (time.time()- item['last_update_time']) < TIME_OUT:
                 pass
             else:
-                print(">>>>>>>>>>>time out, need to update DB") #only to update the metric to 16
+                print("{0} is detected to time out, update table".format(destination))
+                # when update table need to set the router_change_flag to True, means it was changed
                 updateRoutingTable(destination, MAX_METRIC, item['next_hop_id'],True)
                 
     random_offset = random.randint(-5,5)
@@ -179,11 +188,12 @@ def processGarbageCollection():
     for item in routing_table:
         destination = item['destination']
         if destination != my_router_id:
-            #if the garbage time is out  delete it from routing table
+            # if the destination information is not been updated or the time is unexpired
+            #pass and wait next started time to process
             if item['garbage_collect_start'] is None or (time.time() - item['garbage_collect_start']) < GARBAGE_COLLECT_TIME:
                 pass
             else:
-                print("someone need to be deleted")
+                # when the garbage collect time is expired, delete from table
                 deleteFromTable(destination)
                               
     random_offset = random.randint(-5,5)
@@ -195,26 +205,33 @@ def processGarbageCollection():
 
 
 #################################  create the response packet###############
-def createPacket( isUpdateOnly):
-    """use to compose package"""
+def createPacket(index, isUpdateOnly):
+    """use to compose package when isUpdateOnly is true means this packet is used
+    for update message by trigger"""
     global neighbours
-    package = {}  
-    package['header'] =  createPacketHeader()
+    
+    
     body = []
+    
+    neighbourId = neighbours[index]
+    package = {} 
+    package['header'] = createPacketHeader()
+   
     for item in routing_table:
         if isUpdateOnly:
+                    #the flag is not changed, do not put this message to package
             if item['router_change_flag'] == 'False':
                 continue
                 
-        #poisoned reverse if the next_ho_id = neighbour_id and the destination
-        # need throuh neighbour so sign the metric 16
-        if str(item['next_hop_id']) in neighbours and item['destination'] != item['next_hop_id']:
+#poisoned reverse: set the metric of router which through the neighbour to 16
+        if item['next_hop_id'] ==  neighbourId and item['destination'] != neighbourId:
             entry = createPacketEntry(item['destination'], 16)
         else:
             entry = createPacketEntry(item['destination'], item['metric'])    
         body.append(entry)
     package['entry'] = body
-    return package           
+        
+    return package          
 
 def createPacketHeader():
     """create packet header header format: command|version|must be zero|id"""
@@ -231,43 +248,75 @@ def createPacketEntry(destination,metric):
     
     
 
-#######################send RIP response ############################
+#######################send RIP response            ############################
 def sendPacket(isUpdateOnly):
     """send out unsolicited response to each neighbour router"""
-    try:
-        packet = createPacket(isUpdateOnly)
-        message = json.dumps(packet).encode('utf-8')
-        for port in output_ports:
-            outSocket = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
-            outSocket.sendto(message,('', int(port)))
-            outSocket.close()
-                        
-        #once packet has been send the flags should be set into no change
-        for item in routing_table:
-            item['router_change_flag'] = False
-        if isUpdateOnly:
-            print("send trigger message to neighbour succeed")
-        else:
-            print("send unsolicited message to neighbour succeed")   
+    try:   
+        #send packet to each port which reads from configure file
+        rs, ws, es = select.select([],listen_sockets,[])
+        
+        sendSocket = ws[0]
+        
+        for i in range(0,len(output_ports)):
+            packet = createPacket(i,isUpdateOnly)
+            #print(packet)
+            #convert python object into json string and encode 
+            message = json.dumps(packet).encode('utf-8')
+            sendSocket.sendto(message,('', int(output_ports[i])))
             
+                        
+        """once all of the triggered updates have been generated
+        the router change falgs shoule be cleared"""
+        if(isUpdateOnly):
+            print("send trigger message  succeed")
+            for item in routing_table:
+                item['router_change_flag'] = False          
+        else:
+            print("send unsolicited message  succeed")   
             
     except Exception as err:
         print('sendpackage error:{0}'.format(err))
+        
+def sendDeleteTriggerPacket(destination):
+    try:   
+        #send packet to each port which reads from configure file
+        rs, ws, es = select.select([],listen_sockets,[])
+        
+        sendSocket = ws[0]
+        
+        for i in range(0,len(output_ports)):
+            packet = {} 
+            packet['header'] = createPacketHeader()            
+            
+            packet['entry'] = createPacketEntry(destination, MAX_METRIC) 
+            #print(packet)
+            #convert python object into json string and encode 
+            message = json.dumps(packet).encode('utf-8')
+            sendSocket.sendto(message,('', int(output_ports[i])))
+                            
+      
+        print("send trigger message  succeed")
+             
+            
+    except Exception as err:
+        print('sendpackage error:{0}'.format(err))    
+
         
         
         
     
 
         
-############################### receive packets from sockets ###########        
+############################### receive packets from sockets         ###########        
 def recvPacket():
     '''after the listenSocket the recv threads is receiving data from the socket 
     which connect this socket''' 
     while True:
         rs, ws, es = select.select(listen_sockets,[],[])
-        for r in rs:
+        for r in rs:#traverse the readable socket
             if r in listen_sockets:
                 message, address = r.recvfrom(2048)
+                #decode and convert json string into python object 
                 packet = json.loads(message.decode('utf-8'))
                 print("message received: {0}".format(packet))
                 if IsValidPacket(packet): #check the packet is or not legal  
@@ -278,69 +327,81 @@ def recvPacket():
  
 def IsValidPacket(packet):
     """vertify  validity check the version match 2
-    and the routerid and ports are valubable"""   
+    and the routerid and ports are valubable   
+    header format:command|version|must be zero|id 
+    entry format: address family identifier|must be zero| IPv4 address
+    |must be zero|must be zero|metric"""   
     isValid = True
     tempRouterid = packet['header'][3]
     if packet['header'][0] != HEAD_ERCOMMAND or packet['header'][1] != HEAD_VERSION :
         isValid =False
     if packet['header'][2] != MUST_BE_ZERO or isValidId(tempRouterid)==False:
         isValid =False
-    entry = packet['entry']
-    for item in entry:
-        if isValidId(item[2])==False or ( item[5]>16 or item[5] <0):
-            isValid =False
+    if 'entry'in packet.keys():
+        entry = packet['entry']
+        for item in entry:
+            if isValidId(item[2])==False or ( item[5]>16 or item[5] <0):
+                isValid =False
     return isValid
  
-########################process       packet          #######################
+########################process       packet             #######################
 #deal with packet 
 def processPacket(packet):
     sendRouterId = packet['header'][3]
-    entry = packet['entry']
-    #get the line which can get the metric from sender to this router
-    senderInfo = getItemFromRoutingTable(sendRouterId)  
-      # if exit index >= 0
-    #print(">>>>>>>>>>>>>>>>>entry=", entry)
-    if senderInfo is None:
-        senderInfo = getItemFromConfigerTable(sendRouterId)
-        addToRoutingTable(sendRouterId,senderInfo['metric'], "-")
-        
     
-    for item in entry:
-        #print(">>>>>>>>>>>>>>each entry=", item)
-        destination = item[2]
-        metric = item[5]
-        if destination == my_router_id:
-            continue
-        totalMetric = metric + senderInfo['metric']
-        if totalMetric >= MAX_METRIC:
-            totalMetric = MAX_METRIC            
-        #check the new destination is in the table
-        original_item = getItemFromRoutingTable(destination) 
+    #get the sender infomation from routing table 
+    senderInfo = getItemFromRoutingTable(sendRouterId)  
+    senderConfigerInfo = getItemFromConfigerTable(sendRouterId)
+    #this sender is not exit, get infotmation from configure table which read from configure file
+    #then add into routing table, else check the meric is or not change 
+    if senderInfo is None:
+        addToRoutingTable(sendRouterId,senderConfigerInfo['metric'], sendRouterId)
+    else:
+        if int(senderInfo['metric']) < int(senderConfigerInfo['metric']):
+            updateRoutingTable(sendRouterId,senderInfo['metric'],sendRouterId, True)
+        
+    #deal with entry informatin
+    if 'entry' in packet.keys():
+        entry = packet['entry']
+        for item in entry:
+            destination = item[2]
+            if destination == my_router_id:
+                continue
+            metric = item[5]
+            totalMetric = metric + senderConfigerInfo['metric']
+            if totalMetric >= MAX_METRIC:
+                totalMetric = MAX_METRIC            
+        #get the new destination information from touring table
+            destItemInfo = getItemFromRoutingTable(destination) 
              
-        #print(">>>>>>>>check destination>>>>>>>>>>>", original_item)
-        if  original_item is None: #if not in the table, add it 
-            addToRoutingTable(destination,totalMetric, sendRouterId)             
-        else:      
-            if original_item['next_hop_id'] == '-': # directly connect
-                updateRoutingTable(destination,totalMetric,sendRouterId,False)        
-                #check the next hop is  the sender
-            elif int(original_item['next_hop_id']) == sendRouterId:
-                if int(original_item['metric'])!= totalMetric:
-                    updateRoutingTable(destination,totalMetric,sendRouterId,True)
-                else:
-                    updateRoutingTable(destination,totalMetric,sendRouterId,False)
-            else: #check the next hop is  the sender
-                if int(original_item['metric'])<= totalMetric:
-                    updateRoutingTable(destination,original_item['metric'],original_item['next_hop_id'],False)
-                else:
-                    updateRoutingTable(destination,totalMetric,sendRouterId,True)
+        #if not in the table, check the metric then add to routing table 
+            if  destItemInfo is None:
+                if totalMetric < MAX_METRIC:
+                    addToRoutingTable(destination,totalMetric, sendRouterId)  
+        #if exist, compare the next hop is the sender or can connect directly.
+            else:                
+                if destItemInfo['next_hop_id'] == sendRouterId: # sender connect directly 
+                    if int(destItemInfo['metric'])!= totalMetric:
+                        updateRoutingTable(destination,totalMetric,sendRouterId,True)
+                # 
+                elif destination in neighbours:
+                    if totalMetric >= 16:
+                        updateRoutingTable(destination,totalMetric,sendRouterId,True)
+                    else:
+                        pass
+                else: #the next hop is not the sender
+                    if int(destItemInfo['metric'])<= totalMetric :
+                        pass
+                    else:
+                        updateRoutingTable(destination,totalMetric,sendRouterId,True)
 
 
-################################operate routing table       ###############
+################################operate routing table            ###############
 def deleteFromTable(destination):
     for item in  routing_table:
-        if item['destination'] == destination or item['next_hop_id'] == destination:
+        if item['destination'] == destination:
             routing_table.remove(item)
+    sendDeleteTriggerPacket(destination)
     print(">>>>>>>>>>>>>>>>delete one from table")
     printTable()
 
@@ -349,6 +410,7 @@ def getItemFromConfigerTable(routerId):
     for item in configure_table:
         if item['destination'] == routerId:
             return item
+        
     return None    
 
 def getItemFromRoutingTable(routerId):
@@ -369,6 +431,8 @@ def addToRoutingTable(destination, metric, nextHop):
                     "last_update_time": time.time()
                 }   
     routing_table.append(table_item)
+    #trigger an update
+    sendPacket(True)
     print(">>>>>>>>>>>>>>>>add to routing table")
     printTable()
 
@@ -379,13 +443,14 @@ def getIndexFromTable(destination):
     return -1
 
 
-def updateRoutingTable(destination, metric, sender, routeChange):
-    """update the neighborhood table""" 
+def updateRoutingTable(destination, metric, nextHop, routeChange):
+    """update the routing table"""
+    print(">>>>>>>>>>>router change flag is {} metric is {} ".format(routeChange,metric))
     if metric < 16:
         table_item = {
                         "destination": destination,
                         "metric": metric, 
-                        "next_hop_id": sender,
+                        "next_hop_id": nextHop,
                         "router_change_flag" : routeChange,
                         "garbage_collect_start": None,
                         "last_update_time": time.time()
@@ -394,10 +459,11 @@ def updateRoutingTable(destination, metric, sender, routeChange):
         routing_table[index] = table_item
     else:
         if routeChange:
+           
             table_item = {
                             "destination": destination,
                             "metric": metric, 
-                            "next_hop_id": sender,
+                            "next_hop_id": nextHop,
                             "router_change_flag" : routeChange,
                             "garbage_collect_start": time.time(),
                             "last_update_time": None
@@ -408,10 +474,10 @@ def updateRoutingTable(destination, metric, sender, routeChange):
                 pass
             else:
                 sendPacket(True) #send the updated route only
-    print(">>>>>>>>>>>>>>>>update routing table metric = ", metric)
+    
     printTable()        
 
-########################print the whole routing table #######################      
+########################print the whole routing table    #######################      
 def printTable():
     """print the RIP routing table"""
     
@@ -455,6 +521,6 @@ def main():
     initGarbageCollectionTimer()#init garbage collection timer
     
     
-    recvPacket() #start recvThreads   
+    recvPacket()    
 
 main()
