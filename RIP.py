@@ -323,8 +323,10 @@ def sendDeleteTriggerPacket(destination):
         
         for i in range(0,len(output_ports)):
             packet = {} 
+            entry = []
             packet['header'] = createPacketHeader()            
-            packet['entry'] = createPacketEntry(destination, MAX_METRIC) 
+            entry.append(createPacketEntry(destination, MAX_METRIC) )
+            packet['entry'] = entry
             #print(packet)
             #convert python object into json string and encode 
             message = json.dumps(packet).encode('utf-8')
@@ -368,23 +370,19 @@ def IsValidPacket(packet):
     header format:command|version|must be zero|id 
     entry format: address family identifier|must be zero| IPv4 address
     |must be zero|must be zero|metric"""   
+    isValid = True
     tempRouterid = packet['header'][3]
     if packet['header'][0] != HEAD_ERCOMMAND or packet['header'][1] != HEAD_VERSION :
-        return False
+        isValid =False
     if packet['header'][2] != MUST_BE_ZERO or isValidId(tempRouterid)==False:
-        return False
+        isValid =False
     if 'entry'in packet.keys():
         entry = packet['entry']
-        if len(entry) >= 2:
-            for item in entry:
-                routerId = item[2]
-                if isValidId(routerId)==False or ( item[5]>16 or item[5] <0):
-                    return False
-        if len(entry) == 1:
-            routerId = entry[2]
-            if isValidId(routerId)==False or ( entry[5]>16 or entry[5] <0):
-                return False            
-    return True
+        for item in entry:
+            routerId = item[2]
+            if isValidId(routerId)==False or ( item[5]>16 or item[5] <0):
+                isValid =False
+    return isValid
  
 ########################process       packet             #######################
 def processPacket(packet):
