@@ -374,13 +374,14 @@ def IsValidPacket(packet):
         isValid =False
     if packet['header'][2] != MUST_BE_ZERO or isValidId(tempRouterid)==False:
         isValid =False
-    if 'entry'in packet.keys():
+    if 'entry' in packet.keys():
         entry = packet['entry']
-        for item in entry:
-            routerId = item[2]
-            if isValidId(routerId)==False or ( item[5]>16 or item[5] <0):
-                isValid =False
-    return isValid
+        if len(entry) > 0:
+			for item in entry:
+				routerId = item[2]
+				if isValidId(routerId)==False or ( item[5]>16 or item[5] <0):
+					isValid =False
+		return isValid
  
 ########################process       packet             #######################
 def processPacket(packet):
