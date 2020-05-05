@@ -195,8 +195,7 @@ def processRouteTimeout():
     """If 180 seconds elapse from the last time the timeout was initialized, the route is
 considered to have expired, Upon expiration of the timeout, the route
 is no longer valid; however, it is retained in the routing table for
-a short time so that neighbors can be notified that the route has
-been dropped"""
+a short time so that neighbors can be notified that the route has been dropped"""
     global timeout_timer
     for item in routing_table:
         destination = item['destination']
@@ -569,7 +568,7 @@ def printTable():
             else:
                 router_change = item['router_change_flag']
             print(content_format.format(item['destination'], item['metric'], 
-                             item['next_hop_id'],router_change,garbage,timeout))
+                             item['next_hop_id'],router_change,timeout,garbage))
         
 
 
