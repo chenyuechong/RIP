@@ -270,7 +270,7 @@ def sendPacket(isUpdateOnly):
         if(isUpdateOnly):
             print("send trigger message  succeed")
             for item in routing_table:
-                item['router_change_flag'] = False          
+                item['router_change_flag'] = False  
         else:
             print("send unsolicited message  succeed")   
             
@@ -450,7 +450,7 @@ def getIndexFromTable(destination):
 def updateRoutingTable(destination, metric, nextHop, routeChange):
     """update the routing table"""
     print(">>>>>>>>>>>router change flag is {} metric is {} ".format(routeChange,metric))
-    if metric <= 16:
+    if metric < 16:
         table_item = {
                         "destination": destination,
                         "metric": metric, 
