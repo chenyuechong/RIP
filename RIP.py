@@ -7,9 +7,11 @@ import threading
 import random
 
 
-#information from configure file
+#information from configure file,
 my_router_id = None
 input_ports =[]
+#the elements in the following two arraies correspond to each other,
+#which means output_ports[index] belongs neighbours[index] 
 output_ports = []
 neighbours = []
 configure_table = []
@@ -41,29 +43,33 @@ timeout_timer = None
 garbage_collection_timer = None
 
 
-#when true, there is no need to send trigger update at the same time
-is_periodic_send = False
+
+
 
 #######################   read configure file         ##########################
-
+"""configure file format:
+router-id 1
+input-ports 6110,6210,7345
+outputs 5002-2-1,5003-6-5,5004-7-8
+"""
 def loadConfigFile(fileName):
-    """load the configure file and init every thing we need"""
+    #using the global keyworld means we need to change it in this function
     global my_router_id, input_ports ,output_ports ,configure_table ,listen_pockets 
     file = open(fileName)
     lines = file.read().splitlines()
     for line in lines:
         data = line.split(' ')
-        if data[0] == 'router-id':
-            if isValidId(int(data[1])):
+        if data[0] == 'router-id':# read the first line
+            if isValidId(int(data[1])):#vertify validity
                 my_router_id = int(data[1])
             else:
                 print('Invalid Id Number')
                 exit(0)
-        elif data[0] == 'input-ports':
+        elif data[0] == 'input-ports':#second line
             ports = data[1].split(',')
             for port in ports:
-                if isValidPort(int(port)):
-                    input_ports.append(int(port))
+                if isValidPort(int(port)): #vertify validity
+                    input_ports.append(int(port))# add to list
                 else:
                     print('Invalid Id Number in input-ports')
                     exit(0)
@@ -79,9 +85,9 @@ def loadConfigFile(fileName):
                         "router_change_flag" : False,
                         "garbage_collect_start": None,
                         "last_update_time": None
-                    }
-                    configure_table.append(table_item)
-                    output_ports.append(ports[0])
+                    } # one sigle information format 
+                    configure_table.append(table_item) #add to configure table
+                    output_ports.append(ports[0]) # 
                     neighbours.append(ports[1])
                 else:
                     print('Invalid Id Number or RouterId in outputs')
@@ -99,13 +105,13 @@ def loadConfigFile(fileName):
     
     
 
-#check the port is or not between 1024 and 64000
+"""check the port is or not between 1024 and 64000"""
 def isValidPort(port):
     if port >=1024 and port <=64000:
         return True
     else:
         return False
-#check the router Id is or not between 1 and 64000
+"""check the router Id is or not between 1 and 64000"""
 def isValidId(num):
     if num>=1 and num <= 64000:
         return True
@@ -115,10 +121,11 @@ def isValidId(num):
 
 ##################### create listen sockets to each neighbor###################   
 def initListenSocket():
-    """init all the ports which needs to  be listen"""
+    """traverse the input_ports array and create socket for each port the store
+    the socket to listen_sockets array"""
     global listen_sockets
     try:
-        for port in input_ports:
+        for port in input_ports: 
             inSocket = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
             inSocket.bind(('', int(port)))
             listen_sockets.append(inSocket)
@@ -151,10 +158,7 @@ def initGarbageCollectionTimer():
 def sendUnsoclicitedResponse():
     """send unsoclicited response"""
     global is_periodic_send, periodic_timer
-    #when start periodic sending set the flag to true,after that set it back
-    is_periodic_send = True  
     sendPacket(False)  #send out the whole routing table
-    is_periodic_send = False # end periodic sending
     random_offset = random.randint(-5,5)
     period = PERIODIC_TIME + random_offset
     periodic_timer.cancel()
