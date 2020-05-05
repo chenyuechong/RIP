@@ -380,7 +380,7 @@ def IsValidPacket(packet):
                 routerId = item[2]
                 if isValidId(routerId)==False or ( item[5]>16 or item[5] <0):
                     return False
-        else:
+        if len(entry) == 1:
             routerId = entry[2]
             if isValidId(routerId)==False or ( entry[5]>16 or entry[5] <0):
                 return False            
