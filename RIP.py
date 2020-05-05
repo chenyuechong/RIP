@@ -340,7 +340,8 @@ def IsValidPacket(packet):
     if 'entry'in packet.keys():
         entry = packet['entry']
         for item in entry:
-            if isValidId(item[2])==False or ( item[5]>16 or item[5] <0):
+            routerId = item[2]
+            if isValidId(routerId)==False or ( item[5]>16 or item[5] <0):
                 isValid =False
     return isValid
  
@@ -359,6 +360,8 @@ def processPacket(packet):
     else:
         if int(senderInfo['metric']) < int(senderConfigerInfo['metric']):
             updateRoutingTable(sendRouterId,senderInfo['metric'],sendRouterId, True)
+        else:
+            updateRoutingTable(sendRouterId,senderInfo['metric'],sendRouterId, False)
         
     #deal with entry informatin
     if 'entry' in packet.keys():
@@ -379,16 +382,14 @@ def processPacket(packet):
                 if totalMetric < MAX_METRIC:
                     addToRoutingTable(destination,totalMetric, sendRouterId)  
         #if exist, compare the next hop is the sender or can connect directly.
-            else:                
+            else:  
                 if destItemInfo['next_hop_id'] == sendRouterId: # sender connect directly 
                     if int(destItemInfo['metric'])!= totalMetric:
                         updateRoutingTable(destination,totalMetric,sendRouterId,True)
-                # 
-                elif destination in neighbours:
-                    if totalMetric >= 16:
-                        updateRoutingTable(destination,totalMetric,sendRouterId,True)
                     else:
-                        pass
+                        updateRoutingTable(destination,totalMetric,sendRouterId,False)
+		elif destination in neighbours:
+		    pass
                 else: #the next hop is not the sender
                     if int(destItemInfo['metric'])<= totalMetric :
                         pass
@@ -446,7 +447,7 @@ def getIndexFromTable(destination):
 def updateRoutingTable(destination, metric, nextHop, routeChange):
     """update the routing table"""
     print(">>>>>>>>>>>router change flag is {} metric is {} ".format(routeChange,metric))
-    if metric < 16:
+    if metric <= 16:
         table_item = {
                         "destination": destination,
                         "metric": metric, 
@@ -470,10 +471,8 @@ def updateRoutingTable(destination, metric, nextHop, routeChange):
                         }
             index = getIndexFromTable(destination)
             routing_table[index] = table_item
-            if is_periodic_send:
-                pass
-            else:
-                sendPacket(True) #send the updated route only
+            
+            sendPacket(True) #send the updated route only
     
     printTable()        
 
