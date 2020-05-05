@@ -14,7 +14,26 @@ input_ports =[]
 #which means output_ports[index] belongs neighbours[index] 
 output_ports = []
 neighbours = []
+
+
+"""Each router that implements RIP is assumed to have a routing table.
+This table has one entry for every destination that is reachable
+throughout the system operating RIP. Each entry contains at least
+the following information:
+- The IPv4 address of the destination.
+- A metric, which represents the total cost of getting a datagram
+from the router to that destination. This metric is the sum of the
+costs associated with the networks that would be traversed to get
+to the destination.
+- The IPv4 address of the next router along the path to the
+destination (i.e., the next hop). If the destination is on one of
+the directly-connected networks, this item is not needed.
+- A flag to indicate that information about the route has changed
+recently. This will be referred to as the "route change flag."
+- Various timers associated with the route. See section 3.6 for more
+details on timers."""
 configure_table = []
+
 
 # listen socket list
 listen_sockets = []
@@ -30,7 +49,7 @@ HEAD_VERSION = 2
 MUST_BE_ZERO = 0
 ADDRESS_FAMILY_IDENTIFIER = 2
 
-#default timer setting
+#default timer setting for presentation we redefine them to short the waiting time
 TIME_OUT = 20 #default 180
 GARBAGE_COLLECT_TIME = 20 #default 120
 PERIODIC_TIME = 10 #default 30
@@ -85,7 +104,7 @@ def loadConfigFile(fileName):
                         "router_change_flag" : False,
                         "garbage_collect_start": None,
                         "last_update_time": None
-                    } # one sigle information format 
+                    } # one sigle information int table format 
                     configure_table.append(table_item) #add to configure table
                     output_ports.append(ports[0]) # 
                     neighbours.append(ports[1])
@@ -102,7 +121,9 @@ def loadConfigFile(fileName):
     print('directly neighbours are {0}'.format(output_ports))
     print('>>>>>>>>>>>>RIP routing table:' + str(my_router_id)) 
     printTable()      
-    
+
+
+  
     
 
 """check the port is or not between 1024 and 64000"""
@@ -121,8 +142,8 @@ def isValidId(num):
 
 ##################### create listen sockets to each neighbor###################   
 def initListenSocket():
-    """traverse the input_ports array and create socket for each port the store
-    the socket to listen_sockets array"""
+    """traverse input_ports array and create socket for each port then store
+    it in listen_sockets array"""
     global listen_sockets
     try:
         for port in input_ports: 
@@ -136,10 +157,12 @@ def initListenSocket():
 
 ####################         set timers to response        ##################### 
 def initPeriodicTimer():
-    """init periodic timer for sending unsolicited response"""
+    """Every 30 seconds in our doc is PERIODIC_TIME = 10, the RIP process is awakened to send an unsolicited
+Response message containing the complete routing tableto every neighboring router."""
     global periodic_timer
+    #seting a periodic_timer which can excute sendUnsoclicitedResponse function when the time is up
     periodic_timer = threading.Timer(PERIODIC_TIME, sendUnsoclicitedResponse, [])
-    periodic_timer.start()
+    periodic_timer.start() #start this timer
     
     
 def initTimeoutTimer():
@@ -156,9 +179,11 @@ def initGarbageCollectionTimer():
 
 
 def sendUnsoclicitedResponse():
-    """send unsoclicited response"""
-    global is_periodic_send, periodic_timer
+    """an unsolicited Response message containing the complete routing table"""
+    global periodic_timer
     sendPacket(False)  #send out the whole routing table
+    
+    #The 30-second timer is offset by a small random time (+/- 0 to 5 seconds) each time it is set.    
     random_offset = random.randint(-5,5)
     period = PERIODIC_TIME + random_offset
     periodic_timer.cancel()
@@ -167,6 +192,11 @@ def sendUnsoclicitedResponse():
 
 
 def processRouteTimeout():
+    """If 180 seconds elapse from the last time the timeout was initialized, the route is
+considered to have expired, Upon expiration of the timeout, the route
+is no longer valid; however, it is retained in the routing table for
+a short time so that neighbors can be notified that the route has
+been dropped"""
     global timeout_timer
     for item in routing_table:
         destination = item['destination']
@@ -177,9 +207,10 @@ def processRouteTimeout():
                 pass
             else:
                 print("{0} is detected to time out, update table".format(destination))
-                # when update table need to set the router_change_flag to True, means it was changed
+                # when update table need to set the router_change_flag to True, means it was changed, and trigger an update
                 updateRoutingTable(destination, MAX_METRIC, item['next_hop_id'],True)
                 
+   #The 30-second timer is offset by a small random time (+/- 0 to 5 seconds) each time it is set.             
     random_offset = random.randint(-5,5)
     period = TIME_OUT + random_offset
     timeout_timer.cancel()
@@ -188,6 +219,8 @@ def processRouteTimeout():
 
 
 def processGarbageCollection():
+    """Upon expiration of the garbage-collection timer, the
+route is finally removed from the routing table"""
     global garbage_collection_timer
     for item in routing_table:
         destination = item['destination']
@@ -199,7 +232,7 @@ def processGarbageCollection():
             else:
                 # when the garbage collect time is expired, delete from table
                 deleteFromTable(destination)
-                              
+     #The 30-second timer is offset by a small random time (+/- 0 to 5 seconds) each time it is set.                              
     random_offset = random.randint(-5,5)
     period = GARBAGE_COLLECT_TIME + random_offset
     garbage_collection_timer.cancel()
@@ -209,25 +242,24 @@ def processGarbageCollection():
 
 
 #################################  create the response packet###############
+
+
 def createPacket(index, isUpdateOnly):
     """use to compose package when isUpdateOnly is true means this packet is used
-    for update message by trigger"""
-    global neighbours
+    for update message by trigger""" 
     
-    
-    body = []
-    
+    body = []   
     neighbourId = neighbours[index]
     package = {} 
     package['header'] = createPacketHeader()
    
     for item in routing_table:
-        if isUpdateOnly:
-                    #the flag is not changed, do not put this message to package
+        if isUpdateOnly:# only package the router_change_flag= true information
+                #the flag is not changed, do not put this message to package
             if item['router_change_flag'] == 'False':
                 continue
                 
-#poisoned reverse: set the metric of router which through the neighbour to 16
+            #poisoned reverse: set the metric of router which learn from this neighbour to 16
         if item['next_hop_id'] ==  neighbourId and item['destination'] != neighbourId:
             entry = createPacketEntry(item['destination'], 16)
         else:
@@ -254,11 +286,11 @@ def createPacketEntry(destination,metric):
 
 #######################send RIP response            ############################
 def sendPacket(isUpdateOnly):
-    """send out unsolicited response to each neighbour router"""
+    """send package to each neighbour when isUpdateOnly= true means it needs to send only updated table message"""
     try:   
-        #send packet to each port which reads from configure file
+        #listen to all of sckets simultaneously.
         rs, ws, es = select.select([],listen_sockets,[])
-        
+        #get the sockets we can send message
         sendSocket = ws[0]
         
         for i in range(0,len(output_ports)):
@@ -282,39 +314,34 @@ def sendPacket(isUpdateOnly):
         print('sendpackage error:{0}'.format(err))
         
 def sendDeleteTriggerPacket(destination):
+    """only using for trigger update messaget which need to delete an item """
     try:   
-        #send packet to each port which reads from configure file
+        #listen to all of sockets simultaneously
         rs, ws, es = select.select([],listen_sockets,[])
-        
+         #get the sockets we can send message
         sendSocket = ws[0]
         
         for i in range(0,len(output_ports)):
             packet = {} 
             packet['header'] = createPacketHeader()            
-            
             packet['entry'] = createPacketEntry(destination, MAX_METRIC) 
             #print(packet)
             #convert python object into json string and encode 
             message = json.dumps(packet).encode('utf-8')
             sendSocket.sendto(message,('', int(output_ports[i])))
-                            
-      
+                 
         print("send trigger message  succeed")
              
-            
     except Exception as err:
         print('sendpackage error:{0}'.format(err))    
 
         
-        
-        
-    
-
-        
+               
 ############################### receive packets from sockets         ###########        
 def recvPacket():
     '''after the listenSocket the recv threads is receiving data from the socket 
-    which connect this socket''' 
+    which connect this socket.'''
+    
     while True:
         rs, ws, es = select.select(listen_sockets,[],[])
         for r in rs:#traverse the readable socket
@@ -330,7 +357,13 @@ def recvPacket():
                 
  
 def IsValidPacket(packet):
-    """vertify  validity check the version match 2
+    """
+    The basic validation tests are:
+    - is the destination address valid (e.g., unicast; not net 0 or 127)
+    - is the metric valid (i.e., between 1 and 16, inclusive)
+    If any check fails, ignore that entry and proceed to the next.
+    
+    vertify  validity check the version match 2
     and the routerid and ports are valubable   
     header format:command|version|must be zero|id 
     entry format: address family identifier|must be zero| IPv4 address
@@ -350,8 +383,11 @@ def IsValidPacket(packet):
     return isValid
  
 ########################process       packet             #######################
-#deal with packet 
 def processPacket(packet):
+    """Once the entry has been validated, update the metric by adding the
+cost of the network on which the message arrived. If the result is
+greater than infinity, use infinity. That is,
+metric = MIN (metric + cost, infinity)......see P27 in <<rfc2453-rpv2.pdf>>"""
     sendRouterId = packet['header'][3]
     
     #get the sender infomation from routing table 
@@ -406,6 +442,7 @@ def processPacket(packet):
 
 ################################operate routing table            ###############
 def deleteFromTable(destination):
+    """when delete an item in the dictionary need to find the index frist then remove the index"""
     for item in  routing_table:
         if item['destination'] == destination:
             routing_table.remove(item)
@@ -430,6 +467,15 @@ def getItemFromRoutingTable(routerId):
 
 
 def addToRoutingTable(destination, metric, nextHop):
+    """Adding a route to the routing
+table consists of:
+- Setting the destination address to the destination address in the RTE
+- Setting the metric to the newly calculated metric (as described above)
+- Set the next hop address to be the address of the router from which the datagram came
+- Initialize the timeout for the route. If the garbage-collection
+timer is running for this route, stop it 
+- Set the route change flag
+- Signal the output process to trigger an update (see section 3.8.1"""
     table_item = {
                     "destination": destination,
                     "metric": metric, 
@@ -452,7 +498,17 @@ def getIndexFromTable(destination):
 
 
 def updateRoutingTable(destination, metric, nextHop, routeChange):
-    """update the routing table"""
+    """If the new metric is the same as the old one, it is simplest to do
+nothing further (beyond re-initializing the timeout, as specified
+above); but, there is a heuristic which could be applied. Normally,
+it is senseless to replace a route if the new route has the same
+metric as the existing route; this would cause the route to bounce
+back and forth, which would generate an intolerable number of
+triggered updates. However, if the existing route is showing signs
+of timing out, it may be better to switch to an equally-good
+alternative route immediately, rather than waiting for the timeout to
+happen. Therefore, if the new metric is the same as the old one,
+examine the timeout for the existing route"""
     print(">>>>>>>>>>>router change flag is {} metric is {} ".format(routeChange,metric))
     if metric < 16:
         table_item = {
