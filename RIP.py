@@ -368,7 +368,7 @@ def processPacket(packet):
         entry = packet['entry']
         for item in entry:
             destination = item[2]
-            if destination == my_router_id:
+            if destination == my_router_id:# it 
                 continue
             metric = item[5]
             totalMetric = metric + senderConfigerInfo['metric']
@@ -383,13 +383,16 @@ def processPacket(packet):
                     addToRoutingTable(destination,totalMetric, sendRouterId)  
         #if exist, compare the next hop is the sender or can connect directly.
             else:  
+                #destination learn from sender
                 if destItemInfo['next_hop_id'] == sendRouterId: # sender connect directly 
                     if int(destItemInfo['metric'])!= totalMetric:
                         updateRoutingTable(destination,totalMetric,sendRouterId,True)
                     else:
                         updateRoutingTable(destination,totalMetric,sendRouterId,False)
-		elif destination in neighbours:
-		    pass
+                        
+                #destination which sender learn from myself and poisioned reverse by sender        
+                if destItemInfo['next_hop_id'] in neighbours: # sender connect directly 
+                    pass
                 else: #the next hop is not the sender
                     if int(destItemInfo['metric'])<= totalMetric :
                         pass
